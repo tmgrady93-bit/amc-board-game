@@ -118,24 +118,24 @@ def get_spotify_client():
         st.info("Check your Spotify credentials in .streamlit/secrets.toml")
         return None
 
-# def load_playlists(sp: spotipy.Spotify) -> List[Dict]:
-#     """Load user's playlists."""
-#     try:
-#         st.write("Debug - Fetching playlists...")
-#         results = sp.current_user_playlists()
-#         playlists = []
-#         while results:
-#             st.write(f"Debug - Found {len(results['items'])} playlists in current batch")
-#             playlists.extend(results['items'])
-#             if results['next']:
-#                 results = sp.next(results)
-#             else:
-#                 break
-#         st.write(f"Debug - Total playlists loaded: {len(playlists)}")
-#         return playlists
-#     except Exception as e:
-#         st.error(f"Error loading playlists: {str(e)}")
-#         return []
+def load_playlists(sp: spotipy.Spotify) -> List[Dict]:
+    """Load user's playlists."""
+    try:
+        # st.write("Debug - Fetching playlists...")
+        results = sp.current_user_playlists()
+        playlists = []
+        while results:
+            # st.write(f"Debug - Found {len(results['items'])} playlists in current batch")
+            playlists.extend(results['items'])
+            if results['next']:
+                results = sp.next(results)
+            else:
+                break
+        st.write(f"Debug - Total playlists loaded: {len(playlists)}")
+        return playlists
+    except Exception as e:
+        st.error(f"Error loading playlists: {str(e)}")
+        return []
 
 def load_playlist_tracks(sp: spotipy.Spotify, playlist_id: str) -> List[Dict]:
     """Load all tracks for a given playlist (returns list of track objects)."""
@@ -211,7 +211,7 @@ if not sp:
 if st.button("Refresh Playlists") or not st.session_state.playlists:
     st.session_state.playlists = []
     with st.spinner("Loading your playlists..."):
-        # st.session_state.playlists = load_playlists(sp)
+        st.session_state.playlists = load_playlists(sp)
         if not st.session_state.playlists:
             st.warning("No playlists found. Please check your Spotify account.")
             st.stop()
