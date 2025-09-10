@@ -34,30 +34,37 @@ sp_oauth = SpotifyOAuth(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, redire
 if "token_info" not in st.session_state:
     st.session_state.token_info = None
 
-# Authorization flow (manual-friendly for mobile)
+# Authorization flow — automatic when Spotify redirects back with ?code=...
 if not st.session_state.token_info:
     auth_url = sp_oauth.get_authorize_url()
     st.markdown("### Step 1 — Authorize")
-    st.markdown(f"[Open Spotify authorization page]({auth_url})")
-    st.info("On mobile: follow the link, login/authorize, then you'll be redirected to your REDIRECT_URI with a code. Copy the full redirected URL and paste it below.")
-    redirect_response = st.text_input("Paste the full redirect URL after authorizing (leave empty if already done)")
-    if redirect_response:
-        # extract code
+    colA, colB = st.columns([3,2])
+    with colA:
+        st.markdown("Open the Spotify authorization page to allow this app to access your account.")
+        st.markdown(f"[Login with Spotify]({auth_url})")
+    with colB:
+        st.write("Or tap:")
+        if st.button("Open auth in new tab"):
+            st.write(f"Open this URL in a new tab: {auth_url}")
+
+    # If Streamlit received a redirect with ?code=..., pick it up automatically
+    params = st.experimental_get_query_params()
+    code = params.get("code", [None])[0]
+    if code:
         try:
-            code = parse_qs(urlparse(redirect_response).query).get("code", [None])[0]
-            if not code:
-                st.error("Couldn't find 'code' in the URL. Make sure you pasted the full redirect URL.")
-            else:
-                try:
-                    token_info = sp_oauth.get_access_token(code)
-                except TypeError:
-                    # some spotipy versions return dict directly
-                    token_info = sp_oauth.get_access_token(code)
-                st.session_state.token_info = token_info
-                st.experimental_rerun()
+            # exchange code for token
+            try:
+                token_info = sp_oauth.get_access_token(code)
+            except TypeError:
+                token_info = sp_oauth.get_access_token(code)
+            st.session_state.token_info = token_info
+            # Clean query params in the URL for UX
+            st.experimental_set_query_params()
+            st.experimental_rerun()
         except Exception as e:
             st.error(f"Error obtaining token: {e}")
     else:
+        st.info("After authorizing, Spotify will redirect back to this app and the login will complete automatically.")
         st.stop()
 
 # token present
@@ -152,13 +159,52 @@ if st.button("Find songs"):
 
 # Extra: show user's playlists
 st.markdown("---")
-if st.checkbox("Show my playlists"):
-    try:
-        pls = sp.current_user_playlists(limit=50)
-        for p in pls.get("items", []):
-            st.write(f"{p['name']} — {p['tracks']['total']} tracks")
-    except Exception as e:
-        st.warning(f"Could not fetch playlists: {e}")
+# Playlist explorer and playback
+st.markdown("---")
+st.markdown("### My Playlists")
+try:
+    playlists = sp.current_user_playlists(limit=50).get("items", [])
+except Exception as e:
+    playlists = []
+    st.warning(f"Could not fetch playlists: {e}")
+
+playlist_map = {p['name']: p['id'] for p in playlists}
+if playlists:
+    sel_playlist = st.selectbox("Choose a playlist to browse or play", [p['name'] for p in playlists])
+    pid = playlist_map.get(sel_playlist)
+    if pid:
+        try:
+            tracks_page = sp.playlist_items(pid, fields='items(track(name,uri,artists(name))),total', additional_types=['track'])
+            items = tracks_page.get('items', [])
+            track_list = [it['track'] for it in items if it.get('track')]
+        except Exception as e:
+            track_list = []
+            st.warning(f"Could not fetch tracks for playlist: {e}")
+
+        if track_list:
+            st.write(f"{len(track_list)} tracks in playlist '{sel_playlist}'")
+            # display and allow selecting a track
+            tl_options = [f"{t['name']} — {t['artists'][0]['name']}" for t in track_list]
+            chosen_idx = st.radio("Pick a track to play from the playlist", range(len(tl_options)), format_func=lambda i: tl_options[i])
+            chosen_track = track_list[chosen_idx]
+            if st.button("Play selected track"):
+                try:
+                    sp.start_playback(uris=[chosen_track['uri']])
+                    st.success("Playing selected track on your active device.")
+                except Exception as e:
+                    st.error(f"Could not start playback: {e}")
+
+            if st.button("Start playlist from first track"):
+                try:
+                    # start playback of the playlist context
+                    sp.start_playback(context_uri=f"spotify:playlist:{pid}")
+                    st.success("Playlist started on your active device.")
+                except Exception as e:
+                    st.error(f"Could not start playlist playback: {e}")
+        else:
+            st.info("No tracks found in this playlist.")
+else:
+    st.info("You have no playlists or the app couldn't fetch them.")
 
 
 
