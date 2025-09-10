@@ -7,8 +7,19 @@ from spotipy.oauth2 import SpotifyOAuth
 from typing import Dict, List
 
 # Configure page
-st.set_page_config(page_title="Spotify Playlist Search", layout="centered")
-st.title("Spotify Playlist Search")
+st.set_page_config(page_title="AMC Board Game", layout="centered")
+st.title("AMC Board Game")
+st.markdown(
+    """
+    Use this app alongside the AMC board game to pick music as players move around the board.
+    Choose a playlist for the session and roll the dice to randomly select the next track.
+    
+    - Authenticate with Spotify, then refresh and pick a playlist.
+    - When a player lands on a music space, click "Roll the dice" to pick a random song.
+    - Press "Play 30s preview" to hear a short clip, or use the embedded Spotify player to play the track.
+    - Repeat as turns progress to keep the soundtrack fresh and fun.
+    """
+)
 
 # Initialize session state
 if "playlists" not in st.session_state:
