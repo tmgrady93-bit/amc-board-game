@@ -118,24 +118,24 @@ def get_spotify_client():
         st.info("Check your Spotify credentials in .streamlit/secrets.toml")
         return None
 
-def load_playlists(sp: spotipy.Spotify) -> List[Dict]:
-    """Load user's playlists."""
-    try:
-        st.write("Debug - Fetching playlists...")
-        results = sp.current_user_playlists()
-        playlists = []
-        while results:
-            st.write(f"Debug - Found {len(results['items'])} playlists in current batch")
-            playlists.extend(results['items'])
-            if results['next']:
-                results = sp.next(results)
-            else:
-                break
-        st.write(f"Debug - Total playlists loaded: {len(playlists)}")
-        return playlists
-    except Exception as e:
-        st.error(f"Error loading playlists: {str(e)}")
-        return []
+# def load_playlists(sp: spotipy.Spotify) -> List[Dict]:
+#     """Load user's playlists."""
+#     try:
+#         st.write("Debug - Fetching playlists...")
+#         results = sp.current_user_playlists()
+#         playlists = []
+#         while results:
+#             st.write(f"Debug - Found {len(results['items'])} playlists in current batch")
+#             playlists.extend(results['items'])
+#             if results['next']:
+#                 results = sp.next(results)
+#             else:
+#                 break
+#         st.write(f"Debug - Total playlists loaded: {len(playlists)}")
+#         return playlists
+#     except Exception as e:
+#         st.error(f"Error loading playlists: {str(e)}")
+#         return []
 
 def load_playlist_tracks(sp: spotipy.Spotify, playlist_id: str) -> List[Dict]:
     """Load all tracks for a given playlist (returns list of track objects)."""
@@ -211,7 +211,7 @@ if not sp:
 if st.button("Refresh Playlists") or not st.session_state.playlists:
     st.session_state.playlists = []
     with st.spinner("Loading your playlists..."):
-        st.session_state.playlists = load_playlists(sp)
+        # st.session_state.playlists = load_playlists(sp)
         if not st.session_state.playlists:
             st.warning("No playlists found. Please check your Spotify account.")
             st.stop()
@@ -226,33 +226,33 @@ if not selected_playlist:
 
 st.session_state.selected_playlist = selected_playlist
 
-with st.expander("Search Filters (optional)"):
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        artist_filter = st.text_input("Artist contains")
-    with col2:
-        album_filter = st.text_input("Album contains")
-    with col3:
-        track_filter = st.text_input("Track contains")
+# with st.expander("Search Filters (optional)"):
+#     col1, col2, col3 = st.columns(3)
+#     with col1:
+#         artist_filter = st.text_input("Artist contains")
+#     with col2:
+#         album_filter = st.text_input("Album contains")
+#     with col3:
+#         track_filter = st.text_input("Track contains")
 
-    if st.button("Search"):
-        with st.spinner("Searching playlist..."):
-            st.session_state.search_results = search_playlist(
-                sp,
-                selected_playlist['id'],
-                {
-                    'artist_filter': artist_filter,
-                    'album_filter': album_filter,
-                    'track_filter': track_filter,
-                },
-            )
-        if st.session_state.search_results:
-            st.subheader(f"Found {len(st.session_state.search_results)} matches:")
-            for track in st.session_state.search_results:
-                artists = ", ".join(artist['name'] for artist in track['artists'])
-                st.write(f"\ud83c\udfb5 {track['name']} - {artists} ({track['album']['name']})")
-        else:
-            st.info("No matches found with the current filters.")
+#     if st.button("Search"):
+#         with st.spinner("Searching playlist..."):
+#             st.session_state.search_results = search_playlist(
+#                 sp,
+#                 selected_playlist['id'],
+#                 {
+#                     'artist_filter': artist_filter,
+#                     'album_filter': album_filter,
+#                     'track_filter': track_filter,
+#                 },
+#             )
+#         if st.session_state.search_results:
+#             st.subheader(f"Found {len(st.session_state.search_results)} matches:")
+#             for track in st.session_state.search_results:
+#                 artists = ", ".join(artist['name'] for artist in track['artists'])
+#                 st.write(f"\ud83c\udfb5 {track['name']} - {artists} ({track['album']['name']})")
+#         else:
+#             st.info("No matches found with the current filters.")
 
 st.subheader("Feeling lucky?")
 if st.button("Roll the dice 🎲"):
