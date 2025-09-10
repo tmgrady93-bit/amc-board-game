@@ -267,7 +267,7 @@ if st.button("Roll the dice 🎲"):
         st.session_state.random_track = choice
         st.session_state.random_track_playlist_id = selected_playlist['id']
         st.success(f"Selected: {choice.get('name')} — {artists} ({choice.get('album', {}).get('name', '')})")
-        st.caption("Click the Play button below to hear a 30-second preview (when available).")
+        st.caption("Click the Play button below to hear the song. Stop after 30 seconds.")
 
 # Clear stored random track if user switched playlists
 if st.session_state.random_track_playlist_id and st.session_state.random_track_playlist_id != selected_playlist['id']:
@@ -281,11 +281,11 @@ if st.session_state.random_track:
     if preview_url:
         if st.button("▶ Play 30s preview", key="play_preview"):
             st.audio(preview_url)
-    else:
-        st.warning("This track has no 30-second preview available.")
-        external_url = (track.get('external_urls') or {}).get('spotify')
-        if external_url:
-            st.markdown(f"Open in Spotify: [{external_url}]({external_url})")
+    # else:
+    #     st.warning("This track has no 30-second preview available.")
+    #     external_url = (track.get('external_urls') or {}).get('spotify')
+    #     if external_url:
+    #         st.markdown(f"Open in Spotify: [{external_url}]({external_url})")
 
     # Embedded Spotify player (shows the chosen song)
     track_id = track.get('id')
