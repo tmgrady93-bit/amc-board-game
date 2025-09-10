@@ -1,6 +1,7 @@
 import os
 import random
 import streamlit as st
+import streamlit.components.v1 as components
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from typing import Dict, List
@@ -59,9 +60,15 @@ def get_spotify_client():
 
         # If we don't have a token yet
         if not st.session_state.token_info:
-            # Check URL parameters for auth code
-            params = st.experimental_get_query_params()
-            code = params.get("code", [None])[0]
+            # Check URL parameters for auth code (use modern API)
+            qp = st.query_params
+            # Handle both str and list values gracefully
+            code_val = qp.get("code") if "code" in qp else None
+            code = None
+            if isinstance(code_val, list):
+                code = code_val[0] if code_val else None
+            else:
+                code = code_val
             
             if code:
                 try:
@@ -69,7 +76,11 @@ def get_spotify_client():
                     token_info = sp_oauth.get_access_token(code, check_cache=False)
                     st.session_state.token_info = token_info
                     # Clear the URL parameters
-                    st.experimental_set_query_params()
+                    try:
+                        st.query_params.clear()
+                    except Exception:
+                        # Fallback no-op if running on older Streamlit
+                        pass
                 except Exception as e:
                     st.error(f"Error getting access token: {e}")
                     return None
@@ -275,3 +286,24 @@ if st.session_state.random_track:
         external_url = (track.get('external_urls') or {}).get('spotify')
         if external_url:
             st.markdown(f"Open in Spotify: [{external_url}]({external_url})")
+
+    # Embedded Spotify player (shows the chosen song)
+    track_id = track.get('id')
+    embed_src = None
+    if track_id:
+        embed_src = f"https://open.spotify.com/embed/track/{track_id}?utm_source=generator"
+    else:
+        ext = (track.get('external_urls') or {}).get('spotify')
+        if ext and "/track/" in ext:
+            embed_src = ext.replace("/track/", "/embed/track/")
+
+    if embed_src:
+        components.html(
+            f"""
+            <iframe style="border-radius:12px" src="{embed_src}"
+                width="100%" height="152" frameborder="0"
+                allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                loading="lazy"></iframe>
+            """,
+            height=180,
+        )
