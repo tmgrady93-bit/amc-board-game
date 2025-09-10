@@ -1,214 +1,223 @@
 import os
 import streamlit as st
-from urllib.parse import urlparse, parse_qs
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth
+from typing import Dict, List
 
-try:
-    import spotipy
-    from spotipy.oauth2 import SpotifyOAuth
-except Exception:
-    spotipy = None
+# Configure page
+st.set_page_config(page_title="Spotify Playlist Search", layout="centered")
+st.title("Spotify Playlist Search")
 
-
-SCOPE = "user-library-read user-modify-playback-state user-read-playback-state playlist-read-private"
-
-st.set_page_config(page_title="Mobile Spotify Selector", layout="centered")
-st.title("Mobile Spotify Song Selector")
-
-st.markdown("Enter selection values below to find a song from your Spotify collection and play it on an active device.")
-
-# Helper: check env
-CLIENT_ID = os.getenv("SPOTIPY_CLIENT_ID") or (st.secrets.get("SPOTIPY_CLIENT_ID") if hasattr(st, "secrets") else None)
-CLIENT_SECRET = os.getenv("SPOTIPY_CLIENT_SECRET") or (st.secrets.get("SPOTIPY_CLIENT_SECRET") if hasattr(st, "secrets") else None)
-REDIRECT_URI = os.getenv("SPOTIPY_REDIRECT_URI") or (st.secrets.get("SPOTIPY_REDIRECT_URI") if hasattr(st, "secrets") else None)
-
-if not spotipy:
-    st.error("Missing dependency: spotipy. Install from requirements.txt and restart the app.")
-    st.stop()
-
-if not CLIENT_ID or not CLIENT_SECRET or not REDIRECT_URI:
-    st.warning("Set SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET and SPOTIPY_REDIRECT_URI before using the app. On Streamlit Cloud, add these values under 'Secrets' for your app; locally you can use environment variables (see README).")
-
-# Create OAuth helper
-sp_oauth = SpotifyOAuth(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, redirect_uri=REDIRECT_URI, scope=SCOPE, open_browser=False)
-
+# Initialize session state
+if "playlists" not in st.session_state:
+    st.session_state.playlists = []
+if "selected_playlist" not in st.session_state:
+    st.session_state.selected_playlist = None
+if "search_results" not in st.session_state:
+    st.session_state.search_results = []
 if "token_info" not in st.session_state:
     st.session_state.token_info = None
 
-# Authorization flow — automatic when Spotify redirects back with ?code=...
-if not st.session_state.token_info:
-    auth_url = sp_oauth.get_authorize_url()
-    st.markdown("### Step 1 — Authorize")
-    colA, colB = st.columns([3,2])
-    with colA:
-        st.markdown("Open the Spotify authorization page to allow this app to access your account.")
-        st.markdown(f"[Login with Spotify]({auth_url})")
-    with colB:
-        st.write("Or tap:")
-        if st.button("Open auth in new tab"):
-            st.write(f"Open this URL in a new tab: {auth_url}")
+# Spotify OAuth Configuration
+SCOPE = "playlist-read-private playlist-read-collaborative user-library-read"
 
-    # If Streamlit received a redirect with ?code=..., pick it up automatically
-    # Use the non-deprecated API `st.query_params` which returns the same mapping
-    params = st.query_params
-    code = params.get("code", [None])[0]
-    if code:
-        try:
-            # exchange code for token
-            try:
-                token_info = sp_oauth.get_access_token(code)
-            except TypeError:
-                token_info = sp_oauth.get_access_token(code)
-            st.session_state.token_info = token_info
-            # Clean query params in the URL for UX
-            st.experimental_set_query_params()
-            st.experimental_rerun()
-        except Exception as e:
-            st.error(f"Error obtaining token: {e}")
-    else:
-        st.info("After authorizing, Spotify will redirect back to this app and the login will complete automatically.")
-        st.stop()
-
-# token present
-token_info = st.session_state.token_info
-if not token_info:
-    st.stop()
-
-# Handle refresh if expired
-if sp_oauth.is_token_expired(token_info):
+def get_spotify_client():
+    """Initialize and return an authenticated Spotify client."""
     try:
-        token_info = sp_oauth.refresh_access_token(token_info["refresh_token"]) if isinstance(token_info, dict) else sp_oauth.refresh_access_token(token_info.refresh_token)
-        st.session_state.token_info = token_info
-    except Exception:
-        st.warning("Could not refresh token, please re-authorize.")
-        st.session_state.token_info = None
-        st.experimental_rerun()
+        # Try to get credentials from Streamlit secrets first, then environment variables
+        client_id = st.secrets.get("SPOTIPY_CLIENT_ID") or os.getenv("SPOTIPY_CLIENT_ID")
+        client_secret = st.secrets.get("SPOTIPY_CLIENT_SECRET") or os.getenv("SPOTIPY_CLIENT_SECRET")
+        redirect_uri = st.secrets.get("SPOTIPY_REDIRECT_URI") or os.getenv("SPOTIPY_REDIRECT_URI")
+        
+        if not all([client_id, client_secret, redirect_uri]):
+            st.error("Missing Spotify credentials")
+            return None
 
-access_token = token_info["access_token"] if isinstance(token_info, dict) else token_info['access_token']
-sp = spotipy.Spotify(auth=access_token)
+        sp_oauth = SpotifyOAuth(
+            scope=SCOPE,
+            client_id=client_id,
+            client_secret=client_secret,
+            redirect_uri=redirect_uri,
+            open_browser=False,
+            show_dialog=True
+        )
 
-st.markdown("---")
+        # If we don't have a token yet
+        if not st.session_state.token_info:
+            # Check URL parameters for auth code
+            params = st.experimental_get_query_params()
+            code = params.get("code", [None])[0]
+            
+            if code:
+                try:
+                    # Get token with the code
+                    token_info = sp_oauth.get_access_token(code, check_cache=False)
+                    st.session_state.token_info = token_info
+                    # Clear the URL parameters
+                    st.experimental_set_query_params()
+                except Exception as e:
+                    st.error(f"Error getting access token: {e}")
+                    return None
+            else:
+                # No code in URL, show the auth URL
+                auth_url = sp_oauth.get_authorize_url()
+                st.markdown(f"Please click here to authenticate: [Authenticate with Spotify]({auth_url})")
+                st.stop()
+        
+        # Check if token needs refresh
+        if st.session_state.token_info:
+            if sp_oauth.is_token_expired(st.session_state.token_info):
+                try:
+                    st.session_state.token_info = sp_oauth.refresh_access_token(st.session_state.token_info['refresh_token'])
+                except Exception as e:
+                    st.error(f"Error refreshing token: {e}")
+                    st.session_state.token_info = None
+                    return None
 
-# Selection inputs
-st.markdown("### Select criteria")
-col1, col2 = st.columns(2)
-with col1:
-    mood = st.selectbox("Mood", ["Happy", "Neutral", "Sad"], index=1)
-    energy = st.slider("Energy (0=calm, 1=energetic)", 0.0, 1.0, 0.5, 0.01)
-    tempo = st.slider("Tempo target (BPM)", 60, 180, 100)
-with col2:
-    genres = st.multiselect("Seed genres (optional)", [
-        "pop", "rock", "hip-hop", "electronic", "classical", "jazz", "blues", "country", "reggae", "metal",
-    ])
-    artist_name = st.text_input("Artist name (optional)")
-
-# map mood to valence
-valence_map = {"Happy": 0.8, "Neutral": 0.5, "Sad": 0.2}
-valence = valence_map.get(mood, 0.5)
-
-if st.button("Find songs"):
-    # get seed artists if provided
-    seed_artists = []
-    if artist_name:
-        try:
-            res = sp.search(q=f"artist:{artist_name}", type="artist", limit=1)
-            items = res.get("artists", {}).get("items", [])
-            if items:
-                seed_artists = [items[0]["id"]]
-        except Exception as e:
-            st.warning(f"Error searching artist: {e}")
-
-    # prepare recommendation parameters
-    rec_kwargs = {
-        "limit": 20,
-        "target_valence": float(valence),
-        "target_energy": float(energy),
-        "target_tempo": int(tempo),
-    }
-    if genres:
-        # Spotify requires at least 1 seed (max 5) - use genres as seeds if present
-        rec_kwargs["seed_genres"] = genres[:5]
-    elif seed_artists:
-        rec_kwargs["seed_artists"] = seed_artists[:5]
-    else:
-        # fallback seed genres
-        rec_kwargs["seed_genres"] = ["pop"]
-
-    try:
-        recs = sp.recommendations(**rec_kwargs)
-        tracks = recs.get("tracks", [])
-    except Exception as e:
-        st.error(f"Error getting recommendations: {e}")
-        tracks = []
-
-    if not tracks:
-        st.info("No tracks found with these criteria. Try different seeds or loosen constraints.")
-    else:
-        options = [f"{t['name']} — {t['artists'][0]['name']}" for t in tracks]
-        idx = st.radio("Choose a song", range(len(options)), format_func=lambda i: options[i])
-        chosen = tracks[idx]
-        st.markdown(f"**Selected:** {options[idx]}")
-
-        if st.button("Play on my active device"):
+            # Create Spotify client with the token
+            sp = spotipy.Spotify(auth=st.session_state.token_info['access_token'])
             try:
-                uri = chosen["uri"]
-                sp.start_playback(uris=[uri])
-                st.success("Playback started (if you have an active Spotify device).")
-            except spotipy.SpotifyException as e:
-                st.error(f"Spotify API error: {e}. Make sure you have an active device (Spotify app open on a device) and granted playback scope.")
+                # Test the connection
+                sp.current_user()
+                return sp
             except Exception as e:
-                st.error(f"Error starting playback: {e}")
+                st.error(f"Error validating Spotify connection: {e}")
+                st.session_state.token_info = None
+                return None
+        
+        return None
+        
+    except Exception as e:
+        st.error(f"Authentication failed: {str(e)}")
+        st.info("Check your Spotify credentials in .streamlit/secrets.toml")
+        return None
 
-# Extra: show user's playlists
-st.markdown("---")
-# Playlist explorer and playback
-st.markdown("---")
-st.markdown("### My Playlists")
+def load_playlists(sp: spotipy.Spotify) -> List[Dict]:
+    """Load user's playlists."""
+    try:
+        st.write("Debug - Fetching playlists...")
+        results = sp.current_user_playlists()
+        playlists = []
+        while results:
+            st.write(f"Debug - Found {len(results['items'])} playlists in current batch")
+            playlists.extend(results['items'])
+            if results['next']:
+                results = sp.next(results)
+            else:
+                break
+        st.write(f"Debug - Total playlists loaded: {len(playlists)}")
+        return playlists
+    except Exception as e:
+        st.error(f"Error loading playlists: {str(e)}")
+        return []
+
+def search_playlist(sp: spotipy.Spotify, playlist_id: str, filters: Dict) -> List[Dict]:
+    """Search for tracks in a playlist based on filters."""
+    results = []
+    offset = 0
+    while True:
+        response = sp.playlist_items(playlist_id, offset=offset, fields='items.track(name,artists,album(name),id),next')
+        
+        # Filter tracks based on user criteria
+        for item in response['items']:
+            track = item['track']
+            if track:  # Some tracks might be None due to availability
+                matches_filters = True
+                
+                # Apply filters
+                if filters.get('artist_filter') and not any(
+                    filters['artist_filter'].lower() in artist['name'].lower() 
+                    for artist in track['artists']
+                ):
+                    matches_filters = False
+                
+                if filters.get('album_filter') and filters['album_filter'].lower() not in track['album']['name'].lower():
+                    matches_filters = False
+                
+                if filters.get('track_filter') and filters['track_filter'].lower() not in track['name'].lower():
+                    matches_filters = False
+                
+                if matches_filters:
+                    results.append(track)
+        
+        # Check if there are more items to fetch
+        if not response.get('next'):
+            break
+        offset += len(response['items'])
+    
+    return results
+
+# Main application logic
 try:
-    playlists = sp.current_user_playlists(limit=50).get("items", [])
+    sp = get_spotify_client()
+
+    if sp:
+        # Add a refresh button
+        if st.button("Refresh Playlists") or not st.session_state.playlists:
+            st.session_state.playlists = []
+            
+            # Load playlists
+            with st.spinner("Loading your playlists..."):
+                st.session_state.playlists = load_playlists(sp)
+                if not st.session_state.playlists:
+                    st.warning("No playlists found. Please check your Spotify account.")
+                    st.stop()
 except Exception as e:
-    playlists = []
-    st.warning(f"Could not fetch playlists: {e}")
-
-playlist_map = {p['name']: p['id'] for p in playlists}
-if playlists:
-    sel_playlist = st.selectbox("Choose a playlist to browse or play", [p['name'] for p in playlists])
-    pid = playlist_map.get(sel_playlist)
-    if pid:
-        try:
-            tracks_page = sp.playlist_items(pid, fields='items(track(name,uri,artists(name))),total', additional_types=['track'])
-            items = tracks_page.get('items', [])
-            track_list = [it['track'] for it in items if it.get('track')]
-        except Exception as e:
-            track_list = []
-            st.warning(f"Could not fetch tracks for playlist: {e}")
-
-        if track_list:
-            st.write(f"{len(track_list)} tracks in playlist '{sel_playlist}'")
-            # display and allow selecting a track
-            tl_options = [f"{t['name']} — {t['artists'][0]['name']}" for t in track_list]
-            chosen_idx = st.radio("Pick a track to play from the playlist", range(len(tl_options)), format_func=lambda i: tl_options[i])
-            chosen_track = track_list[chosen_idx]
-            if st.button("Play selected track"):
-                try:
-                    sp.start_playback(uris=[chosen_track['uri']])
-                    st.success("Playing selected track on your active device.")
-                except Exception as e:
-                    st.error(f"Could not start playback: {e}")
-
-            if st.button("Start playlist from first track"):
-                try:
-                    # start playback of the playlist context
-                    sp.start_playback(context_uri=f"spotify:playlist:{pid}")
-                    st.success("Playlist started on your active device.")
-                except Exception as e:
-                    st.error(f"Could not start playlist playback: {e}")
-        else:
-            st.info("No tracks found in this playlist.")
+    st.error(f"Error in main application: {str(e)}")
+    if "token_info" in st.session_state:
+        st.session_state.token_info = None  # Clear token on error
+    st.stop()
+    # Playlist selection
+    playlist_names = [playlist['name'] for playlist in st.session_state.playlists]
+    selected_playlist_name = st.selectbox("Select a playlist", playlist_names)
+    
+    # Get selected playlist ID
+    selected_playlist = next(
+        (playlist for playlist in st.session_state.playlists if playlist['name'] == selected_playlist_name),
+        None
+    )
+    
+    if selected_playlist:
+        st.session_state.selected_playlist = selected_playlist
+        
+        # Search filters
+        st.subheader("Search Filters")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            artist_filter = st.text_input("Artist name contains:")
+        with col2:
+            album_filter = st.text_input("Album name contains:")
+        with col3:
+            track_filter = st.text_input("Track name contains:")
+        
+        # Search button
+        if st.button("Search"):
+            filters = {
+                'artist_filter': artist_filter,
+                'album_filter': album_filter,
+                'track_filter': track_filter
+            }
+            
+            with st.spinner("Searching playlist..."):
+                st.session_state.search_results = search_playlist(sp, selected_playlist['id'], filters)
+            
+            # Display results
+            if st.session_state.search_results:
+                st.subheader(f"Found {len(st.session_state.search_results)} matches:")
+                for track in st.session_state.search_results:
+                    artists = ", ".join(artist['name'] for artist in track['artists'])
+                    st.write(f"🎵 {track['name']} - {artists} ({track['album']['name']})")
+            else:
+                st.info("No matches found with the current filters.")
 else:
-    st.info("You have no playlists or the app couldn't fetch them.")
-
-
-
-# Footer
-st.markdown("---")
-st.caption("This app uses the Spotify Web API. It requires a Spotify Premium account to control playback on devices.")
+    st.error("Please configure Spotify credentials to use this application.")
+    st.markdown("""
+    ### Setup Instructions:
+    1. Create a Spotify Developer account at https://developer.spotify.com
+    2. Create a new application in the Spotify Developer Dashboard
+    3. Set the following environment variables:
+        - SPOTIPY_CLIENT_ID
+        - SPOTIPY_CLIENT_SECRET
+        - SPOTIPY_REDIRECT_URI (e.g., http://localhost:8501)
+    """)

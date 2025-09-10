@@ -16,54 +16,82 @@
 </head>
 <body>
   <div class="card">
-    <h1>Spotify authorization received</h1>
-    <p id="status">Verifying...</p>
-    <div id="controls" style="margin-top:16px; display:none">
-      <p>When you click the button below you'll return to the main app and the login will finish automatically.</p>
-      <button id="returnBtn">Return to app</button>
+    <h1>Spotify authorization</h1>
+    <p id="status">Preparing redirect...</p>
+    <div id="progress" style="margin-top:16px;">
+      <p id="countdown">Redirecting in <span id="secs">3</span> seconds...</p>
+      <p>If you are not redirected automatically you can click the link that will appear below.</p>
     </div>
     <div id="manual" style="margin-top:16px; display:none">
-      <p class="warn">If the automatic return doesn't work, copy the current URL (from your browser's address bar) and paste it into the Streamlit app when prompted.</p>
-      <p>Or click <a id="openApp">here</a> to open the main app (the code parameter will be forwarded if present).</p>
+      <p class="warn">Automatic redirect is not available. Use the link below to continue.</p>
+      <p><a id="openAuth" href="#">Open authorization URL</a></p>
     </div>
     <hr />
-    <small>This page only forwards the Spotify authorization code back to the Streamlit app; no passwords or tokens are stored here.</small>
+    <small>This page helps forward the Spotify authorization request — no passwords or tokens are stored here.</small>
   </div>
 
 <script>
-(function(){
-  const params = new URLSearchParams(window.location.search);
-  const code = params.get('code');
-  const state = params.get('state');
-  const status = document.getElementById('status');
-  const controls = document.getElementById('controls');
-  const manual = document.getElementById('manual');
-  const returnBtn = document.getElementById('returnBtn');
-  const openApp = document.getElementById('openApp');
+  (function(){
+    const params = new URLSearchParams(window.location.search);
+    const providedAuthUrl = params.get('auth_url');
+    const clientId = params.get('client_id');
+    const redirectUri = params.get('redirect_uri');
+    const scopeParam = params.get('scope');
+    const state = params.get('state') || '';
+    const status = document.getElementById('status');
+    const openAuth = document.getElementById('openAuth');
+    const manual = document.getElementById('manual');
+    const secsEl = document.getElementById('secs');
 
-  // Target Streamlit Cloud app root (adjust if your app uses a custom domain)
-  const appRoot = 'https://amc-board-game.streamlit.app/';
+    // Default scopes used by the app
+    const defaultScope = 'user-library-read user-read-playback-state user-modify-playback-state playlist-read-private';
 
-  if (code) {
-    status.innerHTML = '<strong class="ok">Authorization code received.</strong>';
-    controls.style.display = 'block';
-    manual.style.display = 'none';
+    function buildAuthUrlFromParts(clientId, redirectUri, scope, state) {
+      const base = 'https://accounts.spotify.com/authorize';
+      const params = new URLSearchParams();
+      params.set('client_id', clientId);
+      params.set('response_type', 'code');
+      params.set('redirect_uri', redirectUri);
+      params.set('scope', scope);
+      if (state) params.set('state', state);
+      params.set('show_dialog', 'true');
+      return base + '?' + params.toString();
+    }
 
-    // Build a URL back to the app including the original query string so the app can finish the flow.
-    const targetUrl = appRoot + '?' + new URLSearchParams({ code: code, state: state }).toString();
-    openApp.setAttribute('href', targetUrl);
+    // Determine the target auth URL
+    let targetAuthUrl = null;
+    if (providedAuthUrl) {
+      targetAuthUrl = providedAuthUrl;
+    } else if (clientId && redirectUri) {
+      const scope = scopeParam || defaultScope;
+      targetAuthUrl = buildAuthUrlFromParts(clientId, redirectUri, scope, state);
+    }
 
-    returnBtn.addEventListener('click', function(){
-      // navigate back to the app with the code param attached
-      window.location.href = targetUrl;
-    });
-  } else {
-    status.innerHTML = '<strong class="warn">No authorization code found in the URL.</strong>';
-    controls.style.display = 'none';
+    if (!targetAuthUrl) {
+      status.innerHTML = '<strong class="warn">No authorization information found.</strong>';
+      manual.style.display = 'block';
+      openAuth.textContent = 'Return to app';
+      openAuth.href = '/';
+      return;
+    }
+
+    // Try automatic redirect with a short countdown and a manual fallback link
+    openAuth.href = targetAuthUrl;
+    openAuth.textContent = targetAuthUrl;
+    let secs = 3;
+    const interval = setInterval(() => {
+      secs -= 1;
+      secsEl.textContent = String(secs);
+      if (secs <= 0) {
+        clearInterval(interval);
+        // perform the redirect
+        window.location.href = targetAuthUrl;
+      }
+    }, 1000);
+
+    // Show the manual link in case automatic redirect is blocked
     manual.style.display = 'block';
-    openApp.setAttribute('href', appRoot);
-  }
-})();
+  })();
 </script>
 </body>
 </html>
