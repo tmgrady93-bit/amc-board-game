@@ -14,10 +14,10 @@ st.markdown(
     Use this app alongside the AMC board game to pick music as players move around the board.
     Choose a playlist for the session and roll the dice to randomly select the next track.
     
-    - Authenticate with Spotify, then refresh and pick a playlist.
+    - Authenticate with Spotify, then pick a playlist.
     - When a player lands on a music space, click "Roll the dice" to pick a random song.
-    - Press "Play 30s preview" to hear a short clip, or use the embedded Spotify player to play the track.
-    - Repeat as turns progress to keep the soundtrack fresh and fun.
+    - Use the embedded Spotify player to play the track for a quick 30 seconds or until the other team answers.
+    - Repeat as turns progress to keep the soundtrack fresh and fun!
     """
 )
 
