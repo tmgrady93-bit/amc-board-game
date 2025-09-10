@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+env/
+venv/
+
+# Streamlit secrets (do not commit!)
+.streamlit/secrets.toml
+
+# Byte-compiled / optimized / DLL files
+*.so
+*.dylib
+
+# IDEs and editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs and databases
+*.log
+*.sqlite3
+
+# Coverage
+htmlcov/
+.coverage
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# ngrok
+ngrok.yml
+
+# local test files
+*.env
