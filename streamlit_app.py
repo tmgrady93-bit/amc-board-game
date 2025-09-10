@@ -18,6 +18,10 @@ if "search_results" not in st.session_state:
     st.session_state.search_results = []
 if "token_info" not in st.session_state:
     st.session_state.token_info = None
+if "random_track" not in st.session_state:
+    st.session_state.random_track = None
+if "random_track_playlist_id" not in st.session_state:
+    st.session_state.random_track_playlist_id = None
 
 # Spotify OAuth Configuration
 # Include playback scopes for optional device playback
@@ -249,13 +253,25 @@ if st.button("Roll the dice 🎲"):
     else:
         choice = random.choice(valid_tracks)
         artists = ", ".join(artist['name'] for artist in choice.get('artists', []))
+        st.session_state.random_track = choice
+        st.session_state.random_track_playlist_id = selected_playlist['id']
         st.success(f"Selected: {choice.get('name')} — {artists} ({choice.get('album', {}).get('name', '')})")
-        preview_url = choice.get('preview_url')
-        if preview_url:
-            st.info("Playing 30-second preview:")
+        st.caption("Click the Play button below to hear a 30-second preview (when available).")
+
+# Clear stored random track if user switched playlists
+if st.session_state.random_track_playlist_id and st.session_state.random_track_playlist_id != selected_playlist['id']:
+    st.session_state.random_track = None
+    st.session_state.random_track_playlist_id = selected_playlist['id']
+
+# Show Play button for the selected random track
+if st.session_state.random_track:
+    track = st.session_state.random_track
+    preview_url = track.get('preview_url')
+    if preview_url:
+        if st.button("▶ Play 30s preview", key="play_preview"):
             st.audio(preview_url)
-        else:
-            st.warning("This track has no 30-second preview available.")
-            external_url = (choice.get('external_urls') or {}).get('spotify')
-            if external_url:
-                st.markdown(f"Open in Spotify: [{external_url}]({external_url})")
+    else:
+        st.warning("This track has no 30-second preview available.")
+        external_url = (track.get('external_urls') or {}).get('spotify')
+        if external_url:
+            st.markdown(f"Open in Spotify: [{external_url}]({external_url})")
