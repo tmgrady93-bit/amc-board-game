@@ -158,21 +158,6 @@ def search_playlist(sp: spotipy.Spotify, playlist_id: str, filters: Dict) -> Lis
                 st.session_state.token_info = None
             st.stop()
 
-        # if not sp:
-        #     st.error("Please configure Spotify credentials to use this application.")
-        #     st.markdown(
-        #         """
-        #         ### Setup Instructions:
-        #         1. Create a Spotify Developer account at https://developer.spotify.com
-        #         2. Create a new application in the Spotify Developer Dashboard
-        #         3. Set the following environment variables OR add them to .streamlit/secrets.toml:
-        #            - SPOTIPY_CLIENT_ID
-        #            - SPOTIPY_CLIENT_SECRET
-        #            - SPOTIPY_REDIRECT_URI (e.g., http://localhost:8501)
-        #         """
-        #     )
-        #     st.stop()
-
         # Load playlists (first time or when refreshed)
         if st.button("Refresh Playlists") or not st.session_state.playlists:
             st.session_state.playlists = []
@@ -259,14 +244,3 @@ def search_playlist(sp: spotipy.Spotify, playlist_id: str, filters: Dict) -> Lis
                     st.write(f"🎵 {track['name']} - {artists} ({track['album']['name']})")
             else:
                 st.info("No matches found with the current filters.")
-else:
-    st.error("Please configure Spotify credentials to use this application.")
-    st.markdown("""
-    ### Setup Instructions:
-    1. Create a Spotify Developer account at https://developer.spotify.com
-    2. Create a new application in the Spotify Developer Dashboard
-    3. Set the following environment variables:
-        - SPOTIPY_CLIENT_ID
-        - SPOTIPY_CLIENT_SECRET
-        - SPOTIPY_REDIRECT_URI (e.g., http://localhost:8501)
-    """)
