@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Spotify Redirect - Authorization Completed</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; padding: 24px; max-width: 720px; margin: auto; }
+    .card { border: 1px solid #eee; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
+    h1 { margin-top: 0; }
+    .ok { color: #0a0; }
+    .warn { color: #b85; }
+    button { background:#1DB954; color:white; border:none; padding:12px 18px; font-size:16px; border-radius:6px; cursor:pointer; }
+    a { color:#1DB954 }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Spotify authorization received</h1>
+    <p id="status">Verifying...</p>
+    <div id="controls" style="margin-top:16px; display:none">
+      <p>When you click the button below you'll return to the main app and the login will finish automatically.</p>
+      <button id="returnBtn">Return to app</button>
+    </div>
+    <div id="manual" style="margin-top:16px; display:none">
+      <p class="warn">If the automatic return doesn't work, copy the current URL (from your browser's address bar) and paste it into the Streamlit app when prompted.</p>
+      <p>Or click <a id="openApp">here</a> to open the main app (the code parameter will be forwarded if present).</p>
+    </div>
+    <hr />
+    <small>This page only forwards the Spotify authorization code back to the Streamlit app; no passwords or tokens are stored here.</small>
+  </div>
+
+<script>
+(function(){
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  const state = params.get('state');
+  const status = document.getElementById('status');
+  const controls = document.getElementById('controls');
+  const manual = document.getElementById('manual');
+  const returnBtn = document.getElementById('returnBtn');
+  const openApp = document.getElementById('openApp');
+
+  // Target Streamlit Cloud app root (adjust if your app uses a custom domain)
+  const appRoot = 'https://amc-board-game.streamlit.app/';
+
+  if (code) {
+    status.innerHTML = '<strong class="ok">Authorization code received.</strong>';
+    controls.style.display = 'block';
+    manual.style.display = 'none';
+
+    // Build a URL back to the app including the original query string so the app can finish the flow.
+    const targetUrl = appRoot + '?' + new URLSearchParams({ code: code, state: state }).toString();
+    openApp.setAttribute('href', targetUrl);
+
+    returnBtn.addEventListener('click', function(){
+      // navigate back to the app with the code param attached
+      window.location.href = targetUrl;
+    });
+  } else {
+    status.innerHTML = '<strong class="warn">No authorization code found in the URL.</strong>';
+    controls.style.display = 'none';
+    manual.style.display = 'block';
+    openApp.setAttribute('href', appRoot);
+  }
+})();
+</script>
+</body>
+</html>

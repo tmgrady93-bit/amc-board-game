@@ -88,5 +88,20 @@ web: streamlit run streamlit_app.py --server.port $PORT --server.address 0.0.0.0
 Security & notes
 - Redirect URI in your Spotify developer settings must exactly match the redirect URI the deployed app uses (for Streamlit Cloud or a custom domain). For ngrok you can use the forwarded HTTPS URL as the redirect URI while testing (register it in Spotify dashboard first).
 - For public apps, store credentials in the host's secret manager (or in `.streamlit/secrets.toml` which Streamlit Cloud reads). Do not commit secrets to git.
-
+-
 If you want, I can: add a GitHub Actions workflow for automatic deploy-to-Render, or prepare a small `Dockerfile` for containerized hosting. Tell me which provider you prefer and I will prepare deployment files.
+
+Using the included redirect page
+
+This repository includes `redirect.html`, a small static page that receives Spotify's authorization redirect and forwards the user back to the Streamlit app with the `code` query parameter. To use it:
+
+1. Deploy the repo to Streamlit Cloud.
+2. Register the redirect URI in your Spotify developer app as:
+
+```
+https://amc-board-game.streamlit.app/redirect.html
+```
+
+3. In Streamlit Cloud, set `SPOTIPY_REDIRECT_URI` to the same value (Manage app → Secrets).
+
+When a user authorizes the app, Spotify will redirect to `/redirect.html?code=...`; the page shows confirmation and a button to return to the app so the app can finish the OAuth exchange automatically.

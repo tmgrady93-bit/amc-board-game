@@ -48,7 +48,8 @@ if not st.session_state.token_info:
             st.write(f"Open this URL in a new tab: {auth_url}")
 
     # If Streamlit received a redirect with ?code=..., pick it up automatically
-    params = st.experimental_get_query_params()
+    # Use the non-deprecated API `st.query_params` which returns the same mapping
+    params = st.query_params
     code = params.get("code", [None])[0]
     if code:
         try:

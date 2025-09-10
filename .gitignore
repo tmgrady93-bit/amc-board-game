@@ -1,4 +1,4 @@
-# Python
+winget install --id GitHub.cli# Python
 __pycache__/
 *.py[cod]
 *$py.class
