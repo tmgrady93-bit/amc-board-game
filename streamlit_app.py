@@ -143,104 +143,119 @@ def load_playlist_tracks(sp: spotipy.Spotify, playlist_id: str) -> List[Dict]:
 
 def search_playlist(sp: spotipy.Spotify, playlist_id: str, filters: Dict) -> List[Dict]:
     """Search for tracks in a playlist based on filters."""
-    results = []
+    results: List[Dict] = []
     offset = 0
     while True:
-        response = sp.playlist_items(playlist_id, offset=offset, fields='items.track(name,artists,album(name),id),next')
-        
-        # Filter tracks based on user criteria
-        # Main application logic
-        try:
-            sp = get_spotify_client()
-        except Exception as e:
-            st.error(f"Error in authentication: {e}")
-            if "token_info" in st.session_state:
-                st.session_state.token_info = None
-            st.stop()
-
-        # Load playlists (first time or when refreshed)
-        if st.button("Refresh Playlists") or not st.session_state.playlists:
-            st.session_state.playlists = []
-            with st.spinner("Loading your playlists..."):
-                st.session_state.playlists = load_playlists(sp)
-                if not st.session_state.playlists:
-                    st.warning("No playlists found. Please check your Spotify account.")
-                    st.stop()
-
-        # Playlist selection UI
-        playlist_names = [playlist['name'] for playlist in st.session_state.playlists]
-        selected_playlist_name = st.selectbox("Select a playlist", playlist_names)
-
-        selected_playlist = next(
-            (playlist for playlist in st.session_state.playlists if playlist['name'] == selected_playlist_name),
-            None,
+        response = sp.playlist_items(
+            playlist_id,
+            offset=offset,
+            fields='items.track(name,artists,album(name),id,preview_url,external_urls.spotify),next',
         )
 
-        if selected_playlist:
-            st.session_state.selected_playlist = selected_playlist
+        for item in response.get('items', []):
+            track = item.get('track')
+            if not track:
+                continue
+            matches = True
+            if filters.get('artist_filter') and not any(
+                filters['artist_filter'].lower() in a['name'].lower() for a in track.get('artists', [])
+            ):
+                matches = False
+            if matches and filters.get('album_filter') and (
+                filters['album_filter'].lower() not in (track.get('album') or {}).get('name', '').lower()
+            ):
+                matches = False
+            if matches and filters.get('track_filter') and (
+                filters['track_filter'].lower() not in track.get('name', '').lower()
+            ):
+                matches = False
+            if matches:
+                results.append(track)
 
-            # Search filters (optional)
-            with st.expander("Search Filters (optional)"):
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    artist_filter = st.text_input("Artist contains")
-                with col2:
-                    album_filter = st.text_input("Album contains")
-                with col3:
-                    track_filter = st.text_input("Track contains")
+        if not response.get('next'):
+            break
+        offset += len(response.get('items', []))
 
-                if st.button("Search"):
-                    filters = {
-                        'artist_filter': artist_filter,
-                        'album_filter': album_filter,
-                        'track_filter': track_filter,
-                    }
-                    with st.spinner("Searching playlist..."):
-                        st.session_state.search_results = search_playlist(sp, selected_playlist['id'], filters)
-                    if st.session_state.search_results:
-                        st.subheader(f"Found {len(st.session_state.search_results)} matches:")
-                        for track in st.session_state.search_results:
-                            artists = ", ".join(artist['name'] for artist in track['artists'])
-                            st.write(f"\ud83c\udfb5 {track['name']} - {artists} ({track['album']['name']})")
-                    else:
-                        st.info("No matches found with the current filters.")
+    return results
 
-            # Dice roll to pick a random song and play 30s preview
-            st.subheader("Feeling lucky?")
-            if st.button("Roll the dice 🎲"):
-                with st.spinner("Rolling and fetching tracks..."):
-                    tracks = load_playlist_tracks(sp, selected_playlist['id'])
-                valid_tracks = [t for t in tracks if t]
-                if not valid_tracks:
-                    st.warning("No tracks found in this playlist.")
-                else:
-                    choice = random.choice(valid_tracks)
-                    artists = ", ".join(artist['name'] for artist in choice.get('artists', []))
-                    st.success(f"Selected: {choice.get('name')} — {artists} ({choice.get('album', {}).get('name', '')})")
+# ========================
+# Main application UI
+# ========================
+try:
+    sp = get_spotify_client()
+except Exception as e:
+    st.error(f"Error in authentication: {e}")
+    if "token_info" in st.session_state:
+        st.session_state.token_info = None
+    st.stop()
 
-                    preview_url = choice.get('preview_url')
-                    if preview_url:
-                        st.info("Playing 30-second preview:")
-                        st.audio(preview_url)
-                    else:
-                        st.warning("This track has no 30-second preview available.")
-                        external_url = (choice.get('external_urls') or {}).get('spotify')
-                        if external_url:
-                            st.markdown(f"Open in Spotify: [{external_url}]({external_url})")
-            filters = {
-                'artist_filter': artist_filter,
-                'album_filter': album_filter,
-                'track_filter': track_filter
-            }
-            
-            with st.spinner("Searching playlist..."):
-                st.session_state.search_results = search_playlist(sp, selected_playlist['id'], filters)
-            
-            # Display results
-            if st.session_state.search_results:
-                st.subheader(f"Found {len(st.session_state.search_results)} matches:")
-                for track in st.session_state.search_results:
-                    artists = ", ".join(artist['name'] for artist in track['artists'])
-                    st.write(f"🎵 {track['name']} - {artists} ({track['album']['name']})")
-            else:
-                st.info("No matches found with the current filters.")
+if not sp:
+    st.stop()
+
+# Load playlists (first time or when refreshed)
+if st.button("Refresh Playlists") or not st.session_state.playlists:
+    st.session_state.playlists = []
+    with st.spinner("Loading your playlists..."):
+        st.session_state.playlists = load_playlists(sp)
+        if not st.session_state.playlists:
+            st.warning("No playlists found. Please check your Spotify account.")
+            st.stop()
+
+# Playlist selection UI
+playlist_names = [p['name'] for p in st.session_state.playlists]
+selected_playlist_name = st.selectbox("Select a playlist", playlist_names)
+selected_playlist = next((p for p in st.session_state.playlists if p['name'] == selected_playlist_name), None)
+
+if not selected_playlist:
+    st.stop()
+
+st.session_state.selected_playlist = selected_playlist
+
+with st.expander("Search Filters (optional)"):
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        artist_filter = st.text_input("Artist contains")
+    with col2:
+        album_filter = st.text_input("Album contains")
+    with col3:
+        track_filter = st.text_input("Track contains")
+
+    if st.button("Search"):
+        with st.spinner("Searching playlist..."):
+            st.session_state.search_results = search_playlist(
+                sp,
+                selected_playlist['id'],
+                {
+                    'artist_filter': artist_filter,
+                    'album_filter': album_filter,
+                    'track_filter': track_filter,
+                },
+            )
+        if st.session_state.search_results:
+            st.subheader(f"Found {len(st.session_state.search_results)} matches:")
+            for track in st.session_state.search_results:
+                artists = ", ".join(artist['name'] for artist in track['artists'])
+                st.write(f"\ud83c\udfb5 {track['name']} - {artists} ({track['album']['name']})")
+        else:
+            st.info("No matches found with the current filters.")
+
+st.subheader("Feeling lucky?")
+if st.button("Roll the dice 🎲"):
+    with st.spinner("Rolling and fetching tracks..."):
+        tracks = load_playlist_tracks(sp, selected_playlist['id'])
+    valid_tracks = [t for t in tracks if t]
+    if not valid_tracks:
+        st.warning("No tracks found in this playlist.")
+    else:
+        choice = random.choice(valid_tracks)
+        artists = ", ".join(artist['name'] for artist in choice.get('artists', []))
+        st.success(f"Selected: {choice.get('name')} — {artists} ({choice.get('album', {}).get('name', '')})")
+        preview_url = choice.get('preview_url')
+        if preview_url:
+            st.info("Playing 30-second preview:")
+            st.audio(preview_url)
+        else:
+            st.warning("This track has no 30-second preview available.")
+            external_url = (choice.get('external_urls') or {}).get('spotify')
+            if external_url:
+                st.markdown(f"Open in Spotify: [{external_url}]({external_url})")
