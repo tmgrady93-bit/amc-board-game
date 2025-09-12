@@ -1,63 +1,57 @@
 import os
+import time
 import random
-import streamlit as st
-import streamlit.components.v1 as components
-import spotipy
-from spotipy.oauth2 import SpotifyOAuth
 from typing import Dict, List
 
-# Configure page
+import spotipy
+import streamlit as st
+from spotipy.oauth2 import SpotifyOAuth
+
+# Page config
 st.set_page_config(page_title="AMC Board Game", layout="centered")
 st.title("AMC Board Game")
+
 st.markdown(
     """
-    Use this app alongside the AMC board game to pick music as players move around the board.
-    Choose a playlist for the session and roll the dice to randomly select the next track.
-    
-    - Authenticate with Spotify, then pick a playlist.
-    - When a player lands on a music space, click "Roll the dice" to pick a random song.
-    - Use the embedded Spotify player to play the track for a quick 30 seconds or until the other team answers.
-    - Repeat as turns progress to keep the soundtrack fresh and fun!
+    Welcome! This app powers music selection for the AMC board game. As players move around the board, roll a die,
+    draw a color, and play a hidden song preview from that color’s playlist. Guess first, then reveal!
     """
 )
 
-# Initialize session state
-if "playlists" not in st.session_state:
-    st.session_state.playlists = []
-if "selected_playlist" not in st.session_state:
-    st.session_state.selected_playlist = None
-if "search_results" not in st.session_state:
-    st.session_state.search_results = []
-if "token_info" not in st.session_state:
-    st.session_state.token_info = None
-if "random_track" not in st.session_state:
-    st.session_state.random_track = None
-if "random_track_playlist_id" not in st.session_state:
-    st.session_state.random_track_playlist_id = None
-
-# Spotify OAuth Configuration
-# Include playback scopes for optional device playback
+# Global constants
+COLORS = ["Red", "Orange", "Yellow", "Blue", "Purple"]
 SCOPE = "playlist-read-private playlist-read-collaborative user-library-read user-read-playback-state user-modify-playback-state"
 
-def get_spotify_client():
-    """Initialize and return an authenticated Spotify client."""
+# Session state defaults
+ss = st.session_state
+ss.setdefault("page", "About")
+ss.setdefault("token_info", None)
+ss.setdefault("all_playlists", [])  # full objects from Spotify
+ss.setdefault("color_playlists", {})  # {color: playlist_id}
+ss.setdefault("tracks_cache", {})  # {color: [track_objs]}
+ss.setdefault("teams_count", 2)
+ss.setdefault("players_per_team", 2)
+ss.setdefault("player_order", [])
+ss.setdefault("current_player_index", 0)
+ss.setdefault("last_roll", None)
+ss.setdefault("current_color", None)
+ss.setdefault("current_track", None)
+ss.setdefault("reveal_answer", False)
+ss.setdefault("timer_running", False)
+ss.setdefault("timer_started_at", None)
+ss.setdefault("elapsed_last_round", None)
+
+# ---------- Spotify Auth ----------
+
+def get_spotify_client() -> spotipy.Spotify | None:
     try:
-        # Try to get credentials from Streamlit secrets first, then environment variables
-        client_id = (
-            st.secrets["SPOTIPY_CLIENT_ID"] if "SPOTIPY_CLIENT_ID" in st.secrets else os.getenv("SPOTIPY_CLIENT_ID")
-        )
-        client_secret = (
-            st.secrets["SPOTIPY_CLIENT_SECRET"] if "SPOTIPY_CLIENT_SECRET" in st.secrets else os.getenv("SPOTIPY_CLIENT_SECRET")
-        )
-        redirect_uri = (
-            st.secrets["SPOTIPY_REDIRECT_URI"] if "SPOTIPY_REDIRECT_URI" in st.secrets else os.getenv("SPOTIPY_REDIRECT_URI")
-        )
-        
+        client_id = st.secrets["SPOTIPY_CLIENT_ID"] if "SPOTIPY_CLIENT_ID" in st.secrets else os.getenv("SPOTIPY_CLIENT_ID")
+        client_secret = st.secrets["SPOTIPY_CLIENT_SECRET"] if "SPOTIPY_CLIENT_SECRET" in st.secrets else os.getenv("SPOTIPY_CLIENT_SECRET")
+        redirect_uri = st.secrets["SPOTIPY_REDIRECT_URI"] if "SPOTIPY_REDIRECT_URI" in st.secrets else os.getenv("SPOTIPY_REDIRECT_URI")
+
         if not all([client_id, client_secret, redirect_uri]):
             st.error("Missing Spotify credentials")
-            st.info(
-                "Set SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET, and SPOTIPY_REDIRECT_URI in Streamlit Cloud (App → Settings → Secrets) or locally in .streamlit/secrets.toml."
-            )
+            st.info("Set SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET, and SPOTIPY_REDIRECT_URI in Streamlit Cloud or .streamlit/secrets.toml")
             return None
 
         sp_oauth = SpotifyOAuth(
@@ -66,100 +60,78 @@ def get_spotify_client():
             client_secret=client_secret,
             redirect_uri=redirect_uri,
             open_browser=False,
-            show_dialog=True
+            show_dialog=True,
         )
 
-        # If we don't have a token yet
-        if not st.session_state.token_info:
-            # Check URL parameters for auth code (use modern API)
+        if not ss.token_info:
             qp = st.query_params
-            # Handle both str and list values gracefully
             code_val = qp.get("code") if "code" in qp else None
-            code = None
-            if isinstance(code_val, list):
-                code = code_val[0] if code_val else None
-            else:
-                code = code_val
-            
+            code = code_val[0] if isinstance(code_val, list) and code_val else code_val
             if code:
                 try:
-                    # Get token with the code
-                    token_info = sp_oauth.get_access_token(code, check_cache=False)
-                    st.session_state.token_info = token_info
-                    # Clear the URL parameters
+                    ss.token_info = sp_oauth.get_access_token(code, check_cache=False)
                     try:
                         st.query_params.clear()
                     except Exception:
-                        # Fallback no-op if running on older Streamlit
                         pass
                 except Exception as e:
                     st.error(f"Error getting access token: {e}")
                     return None
             else:
-                # No code in URL, show the auth URL
                 auth_url = sp_oauth.get_authorize_url()
                 st.markdown(f"Please click here to authenticate: [Authenticate with Spotify]({auth_url})")
                 st.stop()
-        
-        # Check if token needs refresh
-        if st.session_state.token_info:
-            if sp_oauth.is_token_expired(st.session_state.token_info):
-                try:
-                    st.session_state.token_info = sp_oauth.refresh_access_token(st.session_state.token_info['refresh_token'])
-                except Exception as e:
-                    st.error(f"Error refreshing token: {e}")
-                    st.session_state.token_info = None
-                    return None
 
-            # Create Spotify client with the token
-            sp = spotipy.Spotify(auth=st.session_state.token_info['access_token'])
+        if ss.token_info and sp_oauth.is_token_expired(ss.token_info):
             try:
-                # Test the connection
+                ss.token_info = sp_oauth.refresh_access_token(ss.token_info["refresh_token"])
+            except Exception as e:
+                st.error(f"Error refreshing token: {e}")
+                ss.token_info = None
+                return None
+
+        sp = spotipy.Spotify(auth=ss.token_info["access_token"]) if ss.token_info else None
+        if sp:
+            try:
                 sp.current_user()
                 return sp
             except Exception as e:
                 st.error(f"Error validating Spotify connection: {e}")
-                st.session_state.token_info = None
+                ss.token_info = None
                 return None
-        
         return None
-        
     except Exception as e:
         st.error(f"Authentication failed: {str(e)}")
-        st.info("Check your Spotify credentials in .streamlit/secrets.toml")
         return None
 
-def load_playlists(sp: spotipy.Spotify) -> List[Dict]:
-    """Load user's playlists."""
+# ---------- Spotify helpers ----------
+
+def load_playlists(sp: spotipy.Spotify) -> List[dict]:
     try:
-        # st.write("Debug - Fetching playlists...")
         results = sp.current_user_playlists()
-        playlists = []
+        playlists: List[dict] = []
         while results:
-            # st.write(f"Debug - Found {len(results['items'])} playlists in current batch")
-            playlists.extend(results['items'])
-            if results['next']:
+            playlists.extend(results.get("items", []))
+            if results.get("next"):
                 results = sp.next(results)
             else:
                 break
-        st.write(f"Debug - Total playlists loaded: {len(playlists)}")
         return playlists
     except Exception as e:
         st.error(f"Error loading playlists: {str(e)}")
         return []
 
-def load_playlist_tracks(sp: spotipy.Spotify, playlist_id: str) -> List[Dict]:
-    """Load all tracks for a given playlist (returns list of track objects)."""
-    tracks: List[Dict] = []
+def load_playlist_tracks(sp: spotipy.Spotify, playlist_id: str) -> List[dict]:
+    tracks: List[dict] = []
     try:
-        fields = 'items.track(id,name,preview_url,external_urls.spotify,artists(name),album(name)),next'
+        fields = "items.track(id,name,preview_url,external_urls.spotify,artists(name),album(name)),next"
         results = sp.playlist_items(playlist_id, fields=fields)
         while results:
-            for item in results.get('items', []):
-                track = item.get('track')
+            for item in results.get("items", []):
+                track = item.get("track")
                 if track:
                     tracks.append(track)
-            if results.get('next'):
+            if results.get("next"):
                 results = sp.next(results)
             else:
                 break
@@ -167,154 +139,198 @@ def load_playlist_tracks(sp: spotipy.Spotify, playlist_id: str) -> List[Dict]:
         st.error(f"Error loading tracks: {e}")
     return tracks
 
-def search_playlist(sp: spotipy.Spotify, playlist_id: str, filters: Dict) -> List[Dict]:
-    """Search for tracks in a playlist based on filters."""
-    results: List[Dict] = []
-    offset = 0
-    while True:
-        response = sp.playlist_items(
-            playlist_id,
-            offset=offset,
-            fields='items.track(name,artists,album(name),id,preview_url,external_urls.spotify),next',
-        )
+# ---------- UI helpers ----------
 
-        for item in response.get('items', []):
-            track = item.get('track')
-            if not track:
-                continue
-            matches = True
-            if filters.get('artist_filter') and not any(
-                filters['artist_filter'].lower() in a['name'].lower() for a in track.get('artists', [])
-            ):
-                matches = False
-            if matches and filters.get('album_filter') and (
-                filters['album_filter'].lower() not in (track.get('album') or {}).get('name', '').lower()
-            ):
-                matches = False
-            if matches and filters.get('track_filter') and (
-                filters['track_filter'].lower() not in track.get('name', '').lower()
-            ):
-                matches = False
-            if matches:
-                results.append(track)
-
-        if not response.get('next'):
-            break
-        offset += len(response.get('items', []))
-
-    return results
-
-# ========================
-# Main application UI
-# ========================
-try:
+def ensure_spotify() -> spotipy.Spotify:
     sp = get_spotify_client()
-except Exception as e:
-    st.error(f"Error in authentication: {e}")
-    if "token_info" in st.session_state:
-        st.session_state.token_info = None
-    st.stop()
+    if not sp:
+        st.stop()
+    return sp
 
-if not sp:
-    st.stop()
+def sidebar_nav():
+    st.sidebar.header("Navigation")
+    ss.page = st.sidebar.radio("Go to", ["About", "Setup", "Game Play"], index=["About", "Setup", "Game Play"].index(ss.page))
 
-# Load playlists (first time or when refreshed)
-if st.button("Refresh Playlists") or not st.session_state.playlists:
-    st.session_state.playlists = []
-    with st.spinner("Loading your playlists..."):
-        st.session_state.playlists = load_playlists(sp)
-        if not st.session_state.playlists:
-            st.warning("No playlists found. Please check your Spotify account.")
-            st.stop()
+def build_player_order(teams: int, players_per_team: int) -> list:
+    return [f"Team {t} - Player {p}" for t in range(1, teams + 1) for p in range(1, players_per_team + 1)]
 
-# Playlist selection UI
-playlist_names = [p['name'] for p in st.session_state.playlists]
-selected_playlist_name = st.selectbox("Select a playlist", playlist_names)
-selected_playlist = next((p for p in st.session_state.playlists if p['name'] == selected_playlist_name), None)
+# ---------- Pages ----------
 
-if not selected_playlist:
-    st.stop()
+def render_about():
+    st.subheader("About")
+    st.markdown(
+        """
+        This game uses Spotify to supply songs while you play the AMC board game.
 
-st.session_state.selected_playlist = selected_playlist
+        1) Setup: choose teams and players, then assign a Spotify playlist to each color (Red, Orange, Yellow, Blue, Purple).
+        2) Game Play: roll a die, the app picks a random color, and it plays a hidden song preview from that color’s playlist.
+        3) Guess first, then reveal the answer and move to the next player.
+        """
+    )
 
-# with st.expander("Search Filters (optional)"):
-#     col1, col2, col3 = st.columns(3)
-#     with col1:
-#         artist_filter = st.text_input("Artist contains")
-#     with col2:
-#         album_filter = st.text_input("Album contains")
-#     with col3:
-#         track_filter = st.text_input("Track contains")
 
-#     if st.button("Search"):
-#         with st.spinner("Searching playlist..."):
-#             st.session_state.search_results = search_playlist(
-#                 sp,
-#                 selected_playlist['id'],
-#                 {
-#                     'artist_filter': artist_filter,
-#                     'album_filter': album_filter,
-#                     'track_filter': track_filter,
-#                 },
-#             )
-#         if st.session_state.search_results:
-#             st.subheader(f"Found {len(st.session_state.search_results)} matches:")
-#             for track in st.session_state.search_results:
-#                 artists = ", ".join(artist['name'] for artist in track['artists'])
-#                 st.write(f"\ud83c\udfb5 {track['name']} - {artists} ({track['album']['name']})")
-#         else:
-#             st.info("No matches found with the current filters.")
+def render_setup(sp: spotipy.Spotify):
+    st.subheader("Setup")
+    colA, colB = st.columns(2)
+    with colA:
+        ss.teams_count = st.number_input("Number of teams", min_value=1, max_value=8, value=ss.teams_count, step=1)
+    with colB:
+        ss.players_per_team = st.number_input("Players per team", min_value=1, max_value=10, value=ss.players_per_team, step=1)
 
-st.subheader("Feeling lucky?")
-if st.button("Roll the dice 🎲"):
-    with st.spinner("Rolling and fetching tracks..."):
-        tracks = load_playlist_tracks(sp, selected_playlist['id'])
-    valid_tracks = [t for t in tracks if t]
-    if not valid_tracks:
-        st.warning("No tracks found in this playlist.")
-    else:
-        choice = random.choice(valid_tracks)
-        artists = ", ".join(artist['name'] for artist in choice.get('artists', []))
-        st.session_state.random_track = choice
-        st.session_state.random_track_playlist_id = selected_playlist['id']
-        st.success(f"Selected: {choice.get('name')} — {artists} ({choice.get('album', {}).get('name', '')})")
-        st.caption("Click the Play button below to hear the song. Stop after 30 seconds.")
+    if st.button("Refresh Spotify Playlists") or not ss.all_playlists:
+        with st.spinner("Loading your playlists..."):
+            ss.all_playlists = load_playlists(sp)
+            if not ss.all_playlists:
+                st.warning("No playlists found.")
 
-# Clear stored random track if user switched playlists
-if st.session_state.random_track_playlist_id and st.session_state.random_track_playlist_id != selected_playlist['id']:
-    st.session_state.random_track = None
-    st.session_state.random_track_playlist_id = selected_playlist['id']
+    playlist_names = [p['name'] for p in ss.all_playlists]
+    name_to_id = {p['name']: p['id'] for p in ss.all_playlists}
 
-# Show Play button for the selected random track
-if st.session_state.random_track:
-    track = st.session_state.random_track
-    preview_url = track.get('preview_url')
-    if preview_url:
-        if st.button("▶ Play 30s preview", key="play_preview"):
+    st.markdown("Assign a playlist to each color:")
+    selects: Dict[str, str] = {}
+    for color in COLORS:
+        default_name = None
+        assigned_id = ss.color_playlists.get(color)
+        if assigned_id:
+            for p in ss.all_playlists:
+                if p['id'] == assigned_id:
+                    default_name = p['name']
+                    break
+        options = ["-- None --"] + playlist_names
+        index = 0
+        if default_name and default_name in playlist_names:
+            index = options.index(default_name)
+        selects[color] = st.selectbox(f"{color} playlist", options=options, index=index)
+
+    if st.button("Save Setup"):
+        ss.color_playlists = {}
+        ss.tracks_cache = {}
+        for color, sel_name in selects.items():
+            if sel_name and sel_name != "-- None --":
+                pid = name_to_id.get(sel_name)
+                if pid:
+                    ss.color_playlists[color] = pid
+        ss.player_order = build_player_order(ss.teams_count, ss.players_per_team)
+        ss.current_player_index = 0
+        with st.spinner("Preloading tracks for selected colors..."):
+            for color, pid in ss.color_playlists.items():
+                ss.tracks_cache[color] = load_playlist_tracks(sp, pid)
+        st.success("Setup saved. You can proceed to Game Play.")
+
+    st.divider()
+    if st.button("Next ➡ Go to Game Play"):
+        ss.page = "Game Play"
+
+
+def draw_color_with_tracks() -> str | None:
+    available = [c for c in COLORS if ss.tracks_cache.get(c)]
+    return random.choice(available) if available else None
+
+
+def start_round():
+    ss.last_roll = random.randint(1, 6)
+    ss.current_color = draw_color_with_tracks()
+    ss.current_track = None
+    ss.reveal_answer = False
+    ss.timer_running = False
+    ss.timer_started_at = None
+    ss.elapsed_last_round = None
+
+    if not ss.current_color:
+        st.warning("No colors with assigned playlists. Please complete Setup.")
+        return
+
+    tracks = ss.tracks_cache.get(ss.current_color, [])
+    if not tracks:
+        st.warning(f"No tracks found for {ss.current_color}.")
+        return
+
+    ss.current_track = random.choice(tracks)
+
+
+def render_timer_and_controls():
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("Play", key="play_btn"):
+            ss.timer_running = True
+            ss.timer_started_at = time.time()
+    with col2:
+        if st.button("Pause", key="pause_btn") and ss.timer_running and ss.timer_started_at:
+            ss.timer_running = False
+            ss.elapsed_last_round = time.time() - ss.timer_started_at
+    with col3:
+        if st.button("Show Answer", key="reveal_btn"):
+            ss.reveal_answer = True
+
+    track = ss.current_track
+    if track:
+        preview_url = track.get('preview_url')
+        if preview_url:
             st.audio(preview_url)
-    # else:
-    #     st.warning("This track has no 30-second preview available.")
-    #     external_url = (track.get('external_urls') or {}).get('spotify')
-    #     if external_url:
-    #         st.markdown(f"Open in Spotify: [{external_url}]({external_url})")
+        else:
+            st.info("No 30-second preview is available for this track.")
 
-    # Embedded Spotify player (shows the chosen song)
-    track_id = track.get('id')
-    embed_src = None
-    if track_id:
-        embed_src = f"https://open.spotify.com/embed/track/{track_id}?utm_source=generator"
-    else:
-        ext = (track.get('external_urls') or {}).get('spotify')
-        if ext and "/track/" in ext:
-            embed_src = ext.replace("/track/", "/embed/track/")
+    if ss.timer_running and ss.timer_started_at:
+        elapsed = time.time() - ss.timer_started_at
+        st.caption(f"Timer running: {elapsed:.1f}s")
+    elif ss.elapsed_last_round is not None:
+        st.caption(f"Last round time: {ss.elapsed_last_round:.1f}s")
 
-    if embed_src:
-        components.html(
-            f"""
-            <iframe style="border-radius:12px" src="{embed_src}"
-                width="100%" height="152" frameborder="0"
-                allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                loading="lazy"></iframe>
-            """,
-            height=180,
-        )
+
+def render_game():
+    st.subheader("Game Play")
+    if not ss.player_order or not ss.color_playlists:
+        st.warning("Please complete Setup first.")
+        return
+
+    current_player = ss.player_order[ss.current_player_index]
+    st.markdown(f"**Current player:** {current_player}")
+
+    if st.button("Roll Dice 🎲"):
+        start_round()
+
+    if ss.last_roll:
+        st.write(f"Roll result: {ss.last_roll}")
+        if ss.current_color:
+            st.write(f"Color drawn: {ss.current_color}")
+        else:
+            st.warning("No valid color available. Assign playlists in Setup.")
+
+    track = ss.current_track
+    if track:
+        if ss.reveal_answer:
+            artists = ", ".join(a['name'] for a in track.get('artists', []))
+            st.success(f"Answer: {track.get('name')} — {artists}")
+        else:
+            st.info("Track selected. Click Play to listen, then Reveal when ready.")
+        render_timer_and_controls()
+
+    st.divider()
+    if st.button("Next ▶ Next Player"):
+        total = len(ss.player_order)
+        ss.current_player_index = (ss.current_player_index + 1) % total
+        ss.last_roll = None
+        ss.current_color = None
+        ss.current_track = None
+        ss.reveal_answer = False
+        ss.timer_running = False
+        ss.timer_started_at = None
+        ss.elapsed_last_round = None
+
+
+# ---- App entry ----
+sp = ensure_spotify()
+sidebar_nav()
+
+if ss.page == "About":
+    render_about()
+elif ss.page == "Setup":
+    if not ss.all_playlists:
+        ss.all_playlists = load_playlists(sp)
+    render_setup(sp)
+else:
+    if not ss.tracks_cache and ss.color_playlists:
+        with st.spinner("Caching tracks..."):
+            for color, pid in ss.color_playlists.items():
+                ss.tracks_cache[color] = load_playlist_tracks(sp, pid)
+    render_game()
